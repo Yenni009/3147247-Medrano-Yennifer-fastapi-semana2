@@ -1,123 +1,143 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import List, Dict, Optional
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field, validator
+from typing import Optional, List
+from enum import Enum
 
-app = FastAPI(title="My API with Pydantic")
+app = FastAPI(title="Mi Biblioteca API")
 
-# Tu primer modelo de datos
-class Product(BaseModel):
-    name: str
-    price: int  # en centavos para evitar decimales
-    available: bool = True  # valor por defecto
+class BookStatus(str, Enum):
+    to_read = "to_read"
+    reading = "reading"
+    finished = "finished"
+    paused = "paused"
 
-# Lista temporal para guardar productos
-products = []
+class BookGenre(str, Enum):
+    fiction = "fiction"
+    non_fiction = "non_fiction"
+    science = "science"
+    biography = "biography"
+    history = "history"
+    technology = "technology"
+    other = "other"
 
-# Crear la aplicación (lo más simple posible)
-app = FastAPI(title="Mi Primera API")
 
-# Endpoint 1: Hello World (OBLIGATORIO)
+# MODELO BASE
+
+class Book(BaseModel):
+    id: Optional[int] = None
+    title: str = Field(..., min_length=1)
+    author: str = Field(..., min_length=1)
+    isbn: Optional[str] = None
+    genre: Optional[BookGenre] = BookGenre.other
+    pages: Optional[int] = None
+    publication_year: Optional[int] = None
+    status: Optional[BookStatus] = BookStatus.to_read
+    rating: Optional[int] = Field(None, ge=1, le=5)
+    notes: Optional[str] = None
+
+    @validator("isbn")
+    def validate_isbn(cls, v):
+        if v and not (len(v) in [10, 13] and v.isdigit()):
+            raise ValueError("ISBN debe tener 10 o 13 dígitos numéricos")
+        return v
+
+
+# BASE DE DATOS EN MEMORIA
+
+books: List[Book] = []
+
+# Agregamos 3 libros de ejemplo
+books.extend([
+    Book(id=1, title="Don Quijote de la Mancha", author="Cervantes", genre=BookGenre.fiction, pages=863, status=BookStatus.finished),
+    Book(id=2, title="Sapiens", author="Yuval Noah Harari", genre=BookGenre.history, pages=498, status=BookStatus.finished),
+    Book(id=3, title="Clean Code", author="Robert C. Martin", genre=BookGenre.technology, pages=464, status=BookStatus.reading),
+])
+
+
+# ENDPOINTS
+
 @app.get("/")
-def hello_world() -> dict:
-    return {"message": "¡Mi primera API FastAPI!"}
+def read_root():
+    return {"message": "Mi Biblioteca API"}
 
-# Endpoint 2: Info básica (OBLIGATORIO)
-@app.get("/info")
-def info():
-    return {"api": "FastAPI", "week": 1, "status": "running"}
+@app.post("/books")
+async def create_book(book: Book):
+    book.id = len(books) + 1
+    books.append(book)
+    return {"message": "Libro creado", "book": book}
 
-# NUEVO: Endpoint personalizado (solo si hay tiempo)
-@app.get("/greeting/{name}")
-def greet_user(name: str) -> dict:
-    return {"greeting": f"¡Hola {name}"}
+@app.get("/books")
+def get_books(
+    genre: Optional[BookGenre] = None,
+    status: Optional[BookStatus] = None
+):
+    results = books
+    if genre:
+        results = [b for b in results if b.genre == genre]
+    if status:
+        results = [b for b in results if b.status == status]
+    return results
 
-@app.get("/my-profile")
-def my_profile():
-    return {
-        "name": "Yennifer Medrano",           # Cambiar por tu nombre
-        "bootcamp": "FastAPI",
-        "week": 1,
-        "date": "2025",
-        "likes_fastapi": True              # ¿Te gustó FastAPI?
-    }
+@app.get("/books/{book_id}")
+def get_book(book_id: int):
+    for book in books:
+        if book.id == book_id:
+            return book
+    raise HTTPException(status_code=404, detail="Libro no encontrado")
 
-@app.get("/calculate/{num1}/{num2}")
-def calculate(num1: int, num2: int) -> dict:
-    result = num1 + num2
-    return {"result": result, "operation": "sum"}
+@app.put("/books/{book_id}")
+def update_book(book_id: int, updated_book: Book):
+    for i, book in enumerate(books):
+        if book.id == book_id:
+            updated_book.id = book_id
+            books[i] = updated_book
+            return {"message": "Libro actualizado", "book": updated_book}
+    raise HTTPException(status_code=404, detail="Libro no encontrado")
 
-# Lista de strings
-@app.get("/fruits")
-def get_fruits() -> List[str]:
-    return ["apple", "banana", "orange"]
+@app.patch("/books/{book_id}")
+def partial_update_book(book_id: int, updated_fields: dict):
+    for book in books:
+        if book.id == book_id:
+            for key, value in updated_fields.items():
+                if hasattr(book, key):
+                    setattr(book, key, value)
+            return {"message": "Libro actualizado parcialmente", "book": book}
+    raise HTTPException(status_code=404, detail="Libro no encontrado")
 
-# Lista de números
-@app.get("/numbers")
-def get_numbers() -> List[int]:
-    return [1, 2, 3, 4, 5]
+@app.delete("/books/{book_id}")
+def delete_book(book_id: int):
+    for i, book in enumerate(books):
+        if book.id == book_id:
+            deleted = books.pop(i)
+            return {"message": "Libro eliminado", "book": deleted}
+    raise HTTPException(status_code=404, detail="Libro no encontrado")
 
-# Diccionario con estructura conocida
-@app.get("/user/{user_id}")
-def get_user(user_id: int) -> Dict[str, str]:
-    return {
-        "id": str(user_id),
-        "name": "Demo User",
-        "email": "demo@example.com"
-    }
 
-@app.post("/products")
-def create_product(product: Product) -> dict:
-    product_dict = product.model_dump()
-    product_dict["id"] = len(products) + 1
-    products.append(product_dict)
-    return {"message": "Product created", "product": product_dict}
+# ENDPOINTS DE BÚSQUEDA
 
-@app.get("/products")
-def get_products() -> dict:
-    return {"products": products, "total": len(products)}
+@app.get("/books/search/title")
+def search_by_title(title: str):
+    return [b for b in books if title.lower() in b.title.lower()]
 
-# Parámetro de ruta simple
-@app.get("/products/{product_id}")
-def get_product(product_id: int) -> dict:
-    for product in products:
-        if product["id"] == product_id:
-            return {"product": product}
-    return {"error": "Product not found"}
+@app.get("/books/search/author")
+def search_by_author(author: str):
+    return [b for b in books if author.lower() in b.author.lower()]
 
-# Múltiples parámetros de ruta
-@app.get("/categories/{category}/products/{product_id}")
-def product_by_category(category: str, product_id: int) -> dict:
-    return {
-        "category": category,
-        "product_id": product_id,
-        "message": f"Searching product {product_id} in {category}"
-    }
-    
-@app.get("/search")
-def search_products(
-    name: Optional[str] = None,
-    max_price: Optional[int] = None,
-    available: Optional[bool] = None
-) -> dict:
-    results = products.copy()
 
-    if name:
-        results = [p for p in results if name.lower() in p["name"].lower()]
-    if max_price:
-        results = [p for p in results if p["price"] <= max_price]
-    if available is not None:
-        results = [p for p in results if p["available"] == available]
+# ENDPOINTS ASYNC
 
-    return {"results": results, "total": len(results)}
+@app.get("/books/{book_id}/metadata")
+async def get_metadata(book_id: int):
+    for book in books:
+        if book.id == book_id:
+            return {
+                "id": book.id,
+                "title": book.title,
+                "author": book.author,
+                "metadata": {
+                    "last_accessed": "2025-09-03",
+                    "info": "Simulación async"
+                }
+            }
+    raise HTTPException(status_code=404, detail="Libro no encontrado")
 
-class ProductResponse(BaseModel):
-    id: int
-    name: str
-    price: int
-    available: bool
-    message: str = "Product retrieved successfully"
-
-class ProductListResponse(BaseModel):
-    products: list
-    total: int
-    message: str = "List retrieved successfully"
