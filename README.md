@@ -1,4 +1,16 @@
+#  API de Biblioteca Personal
 
+Proyecto de la Semana 2 - Bootcamp FastAPI.  
+Implementa una API REST sencilla para gestionar libros, usando **FastAPI + Pydantic**.
+
+---
+
+##  Instalación
+
+### 1. Clonar el proyecto
+```bash
+git clone <URL_DEL_REPO>
+cd mi-biblioteca-api
 
 
 # Mi API FastAPI - Semana 2
